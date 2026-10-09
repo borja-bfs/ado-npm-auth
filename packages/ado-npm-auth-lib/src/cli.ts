@@ -9,9 +9,11 @@ import { parseArgs } from "./args.js";
 import { NpmrcFileProvider } from "./npmrc/npmrcFileProvider.js";
 import type { ValidatedFeed } from "./fileProvider.js";
 import { defaultEmail, defaultUser } from "./fileProvider.js";
-import { generateNpmrcPat } from "./npmrc/generate-npmrc-pat.js";
 import { partition } from "./utils/partition.js";
 import { YarnRcFileProvider } from "./yarnrc/yarnrcFileProvider.js";
+import { AzureArtifactsCredentialProvider } from "./credentials/azure-artifacts-credential-provider.js";
+import { PatCredentialProvider } from "./credentials/pat-credential-provider.js";
+import type { CredentialProvider } from "./credentials/credential-provider.js";
 
 export const run = async (args: Args): Promise<null | boolean> => {
   const fileProviders = [
@@ -55,39 +57,61 @@ export const run = async (args: Args): Promise<null | boolean> => {
   try {
     console.log("🔑 Authenticating to package feed...");
 
+    let credentialProvider: CredentialProvider;
+    if (args.authMode === "pat") {
+      credentialProvider = new PatCredentialProvider(args.azureAuthLocation);
+    } else if (
+      args.authMode === "credential-provider" ||
+      (args.authMode === "auto" &&
+        AzureArtifactsCredentialProvider.isAvailable())
+    ) {
+      credentialProvider = new AzureArtifactsCredentialProvider();
+    } else if (args.authMode === "auto" && platform() === "linux") {
+      // Preserve the existing Linux behavior, which installs the provider on
+      // demand when it is not already present.
+      credentialProvider = new AzureArtifactsCredentialProvider(true);
+    } else {
+      console.log(
+        "Azure Artifacts Credential Provider was not found; using PAT authentication.",
+      );
+      credentialProvider = new PatCredentialProvider(args.azureAuthLocation);
+    }
+
     const feedsToGetTokenFor = new Map<string, string>();
     for (const feed of invalidFeeds.map((feed) => feed.feed)) {
       feedsToGetTokenFor.set(feed.adoOrganization, feed.registry);
     }
 
     // get a token for each feed
-    const organizationPatMap: Record<string, string> = {};
+    const organizationCredentialMap = new Map<
+      string,
+      Awaited<ReturnType<CredentialProvider["acquireCredential"]>>
+    >();
     for (const [org, feed] of feedsToGetTokenFor) {
-      organizationPatMap[org] = await generateNpmrcPat(
+      organizationCredentialMap.set(
         org,
-        feed,
-        false,
-        args.azureAuthLocation,
+        await credentialProvider.acquireCredential({
+          adoOrganization: org,
+          registry: feed,
+        }),
       );
     }
 
-    // Update the pat in the invalid feeds.
+    // Update the credentials in the invalid feeds.
     for (const invalidFeed of invalidFeeds) {
       const feed = invalidFeed.feed;
 
-      const authToken = organizationPatMap[feed.adoOrganization];
-      if (!authToken) {
-        console.log(
-          `❌ Failed to obtain pat for ${feed.registry} via ${invalidFeed.fileProvider.id}`,
-        );
+      const credential = organizationCredentialMap.get(feed.adoOrganization);
+      if (!credential) {
+        console.log(`❌ Failed to obtain credentials for ${feed.registry}`);
         return false;
       }
-      feed.authToken = authToken;
+      feed.authToken = credential.password;
       if (!feed.email) {
         feed.email = defaultEmail;
       }
       if (!feed.userName) {
-        feed.userName = defaultUser;
+        feed.userName = credential.username || defaultUser;
       }
     }
 

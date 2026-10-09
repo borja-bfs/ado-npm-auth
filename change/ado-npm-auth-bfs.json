@@ -1,0 +1,7 @@
+{
+  "type": "patch",
+  "comment": "Add PAT-less Azure Artifacts authentication through Microsoft's credential provider, including auth modes, cross-platform provider discovery, and user-level credential storage.",
+  "packageName": "ado-npm-auth",
+  "dependentChangeType": "patch",
+  "email": "borja.roig@bldr.com"
+}
