@@ -109,7 +109,11 @@ export class YarnRcFileProvider extends FileProvider {
 
   async paseYarnRc(filePath: string): Promise<YarnRc> {
     const content = await fs.readFile(filePath, "utf8");
-    return load(content, { filename: filePath }) as YarnRc;
+    if (!content.trim()) {
+      return {};
+    }
+
+    return (load(content, { filename: filePath }) as YarnRc | undefined) || {};
   }
 }
 

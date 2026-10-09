@@ -1,12 +1,15 @@
 import yargs from "yargs";
 import { hideBin } from "yargs/helpers";
 
+export type AuthMode = "auto" | "pat" | "credential-provider";
+
 export type Args = {
   doValidCheck: boolean;
   skipAuth: boolean;
   configFile?: string;
   azureAuthLocation?: string;
   exitCodeOnReAuthenticate?: number;
+  authMode: AuthMode;
 };
 
 export function parseArgs(args: string[]): Args {
@@ -33,9 +36,24 @@ export function parseArgs(args: string[]): Args {
         type: "number",
         description: "Exit when re-authentication occurs",
       },
+      authMode: {
+        type: "string",
+        choices: ["auto", "pat", "credential-provider"] as const,
+        default: "auto",
+        description:
+          "Authentication backend: auto, pat, or credential-provider",
+      },
     })
     .help()
     .parseSync();
+
+  if (
+    argv.authMode !== "auto" &&
+    argv.authMode !== "pat" &&
+    argv.authMode !== "credential-provider"
+  ) {
+    throw new Error(`Unsupported authentication mode: ${argv.authMode}`);
+  }
 
   return {
     skipAuth: argv.skipAuth || false,
@@ -43,5 +61,6 @@ export function parseArgs(args: string[]): Args {
     configFile: argv.configFile,
     azureAuthLocation: argv.azureAuthLocation,
     exitCodeOnReAuthenticate: argv.exitCodeOnReAuthenticate,
+    authMode: argv.authMode,
   };
 }

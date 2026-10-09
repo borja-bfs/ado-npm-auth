@@ -12,20 +12,21 @@ const OutputDir = path.resolve(
   "v" + CredentialProviderVersion,
 );
 
-type CredentialProviderResponse = {
+export type CredentialProviderResponse = {
   Username: string;
   Password: string;
 };
 
 export async function credentialProviderPat(
   registry: string,
+  options?: { allowDownload?: boolean },
 ): Promise<CredentialProviderResponse> {
   const nugetFeedUrl = toNugetUrl(registry);
-  const toolPath = await getCredentialProvider();
+  const toolPath = await getCredentialProvider(options?.allowDownload ?? true);
   return await invokeCredentialProvider(toolPath, nugetFeedUrl);
 }
 
-function toNugetUrl(registry: string): string {
+export function toNugetUrl(registry: string): string {
   // Yarn 4 normalizes registry URLs by stripping the trailing slash before
   // invoking auth hooks, so accept the URL with or without it.
   const normalized = registry.endsWith("/") ? registry : registry + "/";
@@ -62,7 +63,7 @@ async function invokeCredentialProvider(
     const value = JSON.parse(response);
     return value as CredentialProviderResponse;
   } catch {
-    throw new Error(`Failed to parse CredentialProvider output: ${response}`);
+    throw new Error("Failed to parse CredentialProvider output");
   }
 }
 
@@ -75,19 +76,47 @@ function tryFileExists(executable: string): string | undefined {
   return undefined;
 }
 
-async function getCredentialProvider(): Promise<string> {
-  let toolPath = tryFileExists(
+export function findCredentialProvider(): string | undefined {
+  const configuredPaths = process.env.NUGET_PLUGIN_PATHS?.split(
+    path.delimiter,
+  ).filter(Boolean);
+  const pluginRoot = path.join(os.homedir(), ".nuget", "plugins");
+  const candidates = [
+    ...(configuredPaths || []),
     path.join(
-      os.homedir(),
-      ".nuget",
-      "plugins",
+      pluginRoot,
+      "netfx",
+      "CredentialProvider.Microsoft",
+      "CredentialProvider.Microsoft",
+    ),
+    path.join(
+      pluginRoot,
       "netcore",
       "CredentialProvider.Microsoft",
       "CredentialProvider.Microsoft",
     ),
-  );
+  ];
+
+  for (const candidate of candidates) {
+    const toolPath = tryFileExists(candidate);
+    if (toolPath) {
+      return toolPath;
+    }
+  }
+
+  return undefined;
+}
+
+async function getCredentialProvider(allowDownload: boolean): Promise<string> {
+  let toolPath = findCredentialProvider();
   if (toolPath) {
     return toolPath;
+  }
+
+  if (!allowDownload) {
+    throw new Error(
+      "Azure Artifacts Credential Provider was not found. Install it in %USERPROFILE%\\.nuget\\plugins or set NUGET_PLUGIN_PATHS.",
+    );
   }
 
   const downloadedFilePath = path.join(
